@@ -1,0 +1,6 @@
+[submodule "tinygltf"]
+	path = tinygltf
+	url = https://github.com/syoyo/tinygltf
+[submodule "hash-octree"]
+	path = hash-octree
+	url = git@github.com:lpiekarski/hash-octree.git
