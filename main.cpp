@@ -9,58 +9,15 @@
 #include <iostream>
 #include <fstream>
 
+#include "point.h"
+#include "octree.h"
+
 using std::cout;
 using std::endl;
 
 
 // the 8 corners of
 
-template <typename Num>
-struct Point {
-    Num x, y, z;
-    Point() : x(0.0), y(0.0), z(0.0) {}
-    Point(Num x, Num y, Num z) : x(x), y(y), z(z) {}
-    
-    bool operator<(Point &right) {
-        return x < right.x && y < right.y && z < right.z;
-    }
-    bool operator>(Point &right) {
-        return x > right.x && y > right.y && z > right.z;
-    }
-    
-    Point operator+(Point right) {
-        return Point(x+right.x, y+right.y, z+right.z);
-    }
-    Point operator-(Point right) {
-        return Point(x-right.x, y-right.y, z-right.z);
-    }
-    Point operator/(Num right) {
-        return Point(x/right, y/right, z/right);
-    }
-    
-    bool closeto(Point<Num> other) {
-        const auto eps = __FLT_EPSILON__;
-        return abs(x-other.x) < eps && abs(y-other.y) < eps && abs(z-other.z) < eps;
-    }
-    
-    Num sum() {
-        return x + y + z;
-    }
-    
-    Num product() {
-        return x * y * z;
-    }
-};
-
-template <typename Num>
-std::ostream& operator<<(std::ostream &os, Point<Num>& point) {
-    os << point.x << ", " << point.y << ", " << point.z;
-    return os;
-}
-
-
-
-typedef Point<float> Pointf;
 // the 8 corners of a cube
 void vertices(std::vector<Pointf> out) {
     const float s = 0.5;
@@ -82,7 +39,7 @@ const Pointf points[] {
     Pointf(-0.5f, -0.5f,  0.5f), // 0
     Pointf( 0.5f, -0.5f,  0.5f), // 1
     Pointf(-0.5f, -0.5f, -0.5f), // 2
-    Pointf( 0.5f, -0.5f,  0.5f), // 3
+    Pointf( 0.5f, -0.5f, -0.5f), // 3
     // backside (+y) starting top left (-x, +z)
     Pointf(-0.5f,  0.5f,  0.5f), // 4
     Pointf( 0.5f,  0.5f,  0.5f), // 5
@@ -91,17 +48,17 @@ const Pointf points[] {
 };
 const int planes[] {
     //-x: 0
-    4,6,2,2,0,4,
+    0,4,6,2,
     //+x: 1
-    1,3,5,5,3,7,
+    3,7,5,1,
     // -y: 2
-    0,2,1,1,2,3,
+    0,2,3,1,
     // +y: 3
-    4,5,6,6,5,7,
+    5,7,6,4,
     //-z: 4
-    2,6,3,3,6,7,
+    6,7,3,2,
     //+z: 5
-    0,1,4,4,1,5
+    1,5,4,0,
 };
 
 
@@ -117,17 +74,11 @@ void add(std::vector<Pointf> &vert, std::vector<int> &ind, Pointf point) {
 }
 
 void cube(std::vector<Pointf> &vert, std::vector<int> &ind, Pointf origin, int direction) {
-    add(vert, ind, origin + points[planes[direction*6 + 0]]);
-    add(vert, ind, origin + points[planes[direction*6 + 1]]);
-    add(vert, ind, origin + points[planes[direction*6 + 2]]);
-    add(vert, ind, origin + points[planes[direction*6 + 3]]);
-    add(vert, ind, origin + points[planes[direction*6 + 4]]);
-    add(vert, ind, origin + points[planes[direction*6 + 5]]);
+    add(vert, ind, origin + points[planes[direction*4 + 0]]);
+    add(vert, ind, origin + points[planes[direction*4 + 1]]);
+    add(vert, ind, origin + points[planes[direction*4 + 2]]);
+    add(vert, ind, origin + points[planes[direction*4 + 3]]);
 }
-
-
- 
-
 
 int main(int argc, char **argv) {
     using namespace tinygltf;
@@ -139,7 +90,7 @@ int main(int argc, char **argv) {
     
     char *filename = argv[1];
     if (!filename) {
-//        filename = "../../PUSHILIN_forest.glb";
+        filename = "../../PUSHILIN_forest.glb";
         filename = "../../DamagedHelmet.glb";
 //        printf("No model file\n");
 //        return 1;
@@ -165,9 +116,21 @@ int main(int argc, char **argv) {
     // Collect points and find the size
     Point min(MAXFLOAT, MAXFLOAT, MAXFLOAT);
     Point max(-MAXFLOAT, -MAXFLOAT, -MAXFLOAT);
-    std::vector<Point<float>> points;
+    std::vector<Pointf> points;
+    std::vector<Triangle<int>> triangleIndices;
     for (auto &mesh : model.meshes) {
         for (auto primitive : mesh.primitives) {
+            const tinygltf::Accessor& indicesAccessor = model.accessors[primitive.indices];
+            const tinygltf::BufferView& indicesBufferView = model.bufferViews[indicesAccessor.bufferView];
+            const tinygltf::Buffer& indicesBuffer = model.buffers[indicesBufferView.buffer];
+            const unsigned short* indices = reinterpret_cast<const unsigned short*>(&indicesBuffer.data[indicesBufferView.byteOffset + indicesAccessor.byteOffset]);
+            
+            
+            for (size_t i = 0; i < indicesAccessor.count; i+=3) {
+                triangleIndices.push_back(Triangle<int>(indices[i], indices[i+1], indices[i+2]));
+            }
+            
+            
             const tinygltf::Accessor& accessor = model.accessors[primitive.attributes["POSITION"]];
             const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
             
@@ -177,7 +140,10 @@ int main(int argc, char **argv) {
             // bufferView byteoffset + accessor byteoffset tells you where the actual position data is within the buffer. From there
             // you should already know how the data needs to be interpreted.
             const float* positions = reinterpret_cast<const float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
-            // From here, you choose what you wish to do with this position data. In this case, we  will display it out.
+            
+            
+            
+            // From here, you choose what you wish to do with this position data.
             for (size_t i = 0; i < accessor.count; ++i) {
                 // Positions are Vec3 components, so for each vec3 stride, offset for x, y, and z.
 //                std::cout << "(" << positions[i * 3 + 0] << ", "// x
@@ -199,10 +165,11 @@ int main(int argc, char **argv) {
         }
     }
     
+    
     Point offset = Point<float>() - min;
-    min = min + offset;
-    max = max + offset;
-    Point size = max;
+    min = min;
+    max = max;
+    Point size = max - min;
     cout << "min: " << min << endl;
     cout << "max: " << max << endl;
     cout << "size: " << size << endl;
@@ -247,76 +214,100 @@ int main(int argc, char **argv) {
         }
     };
 
-    Grid grid(Point(20, 20, 20), size);
-    for (auto point : points) {
-        grid.add(offset + point);
+    int divs = 6;
+    int gridsize = pow(2, divs);
+    Pointf base(gridsize, gridsize, gridsize);
+    Pointf aspect = Pointf(size.x / size.x, size.y/size.x, size.z/size.x);
+    Pointf sized = base * aspect;
+    Point<int> dim((int)sized.x, (int)sized.y, (int)sized.z);
+    Grid grid(dim, size);
+    
+//    for (int i = 0; i < points.size(); i++) {
+//        points[i] += offset;
+//    }
+    // grow a tree
+    Octree tree(points, min, max, divs);
+    for (int i = 0; i < triangleIndices.size(); i++) {
+        auto t = triangleIndices[i];
+        Triangle<Pointf> tp = Triangle<Pointf>(points[t.p1], points[t.p2], points[t.p3]);
+        tree.addTriangle(t, tp);
+    }
+    // put leafs containing a point into the grid
+    for (auto leaf : tree.leafs()) {
+        if (leaf->triangles.size() > 0) {
+            grid.add(offset + leaf->center());
+        }
     }
     
+//    for (auto point : points) {
+//        grid.add(offset + point);
+//    }
+    cout << "Grid dimension: " << dim << endl;
     
-    // Connect all corners to make a homogenous thing
-    int added_count;
-    int maxiter = 10;
-    do {
-        added_count = 0;
-        for (int z = 0; z < grid.dim.z; z++) {
-            for (int y = 0; y < grid.dim.y; y++) {
-                for (int x = 0; x < grid.dim.x; x++) {
-                    if (grid.get(x, y, z)) {
-                        int min = 0xffffff, max = -0xffffff;
-                        for (int i = 0; i < grid.dim.x; i++) {
-                            if (grid.get(i, y, z) && i != x) {
-                                min = i < min ? i : min;
-                                max = i > max ? i : max;
+
+    if (false) {
+        // Connect all corners to make a homogenious thing
+        int added_count;
+        int maxiter = 1;
+        for (;maxiter > 0; maxiter--) {
+            added_count = 0;
+            for (int z = 0; z < grid.dim.z; z++) {
+                for (int y = 0; y < grid.dim.y; y++) {
+                    for (int x = 0; x < grid.dim.x; x++) {
+                        if (grid.get(x, y, z)) {
+                            int min = 0xffffff, max = -0xffffff;
+                            for (int i = 0; i < grid.dim.x; i++) {
+                                if (grid.get(i, y, z) && i != x) {
+                                    min = i < min ? i : min;
+                                    max = i > max ? i : max;
+                                }
                             }
-                        }
-                        for (int i = min; i < max; i++) {
-                            grid.set(i, y, z, true);
-                            added_count++;
-                        }
-                        min = min = 0xffffff, max = -0xffffff;
-                        for (int i = 0; i < grid.dim.x; i++) {
-                            if (grid.get(x, i, z) && i != y) {
-                                min = i < min ? i : min;
-                                max = i > max ? i : max;
+                            for (int i = min; i < max; i++) {
+                                grid.set(i, y, z, true);
+                                added_count++;
                             }
-                        }
-                        for (int i = min; i < max; i++) {
-                            grid.set(x, i, z, true);
-                            added_count++;
-                        }
-                        min = min = 0xffffff, max = -0xffffff;
-                        for (int i = 0; i < grid.dim.z; i++) {
-                            if (grid.get(x, y, i) && i != z) {
-                                min = i < min ? i : min;
-                                max = i > max ? i : max;
+                            min = min = 0xffffff, max = -0xffffff;
+                            for (int i = 0; i < grid.dim.y; i++) {
+                                if (grid.get(x, i, z) && i != y) {
+                                    min = i < min ? i : min;
+                                    max = i > max ? i : max;
+                                }
                             }
-                        }
-                        for (int i = min; i < max; i++) {
-                            grid.set(x, y, i, true);
-                            added_count++;
+                            for (int i = min; i < max; i++) {
+                                grid.set(x, i, z, true);
+                                added_count++;
+                            }
+                            min = min = 0xffffff, max = -0xffffff;
+                            for (int i = 0; i < grid.dim.z; i++) {
+                                if (grid.get(x, y, i) && i != z) {
+                                    min = i < min ? i : min;
+                                    max = i > max ? i : max;
+                                }
+                            }
+                            for (int i = min; i < max; i++) {
+                                grid.set(x, y, i, true);
+                                added_count++;
+                            }
                         }
                     }
                 }
             }
         }
-        if (--maxiter <= 0) {
-            cout << "That's a livelock" << endl;
-            break;
-        };
-    } while (added_count > 0);
+    }
     
-    
-    // print a slice of the grid?
-    for (int z = 0; z < grid.dim.z; z += 2) {
-        for (int y = 0; y < grid.dim.x; y++) {
-            for (int x = 0; x < grid.dim.x; x++) {
-                if (x == 0) cout << endl;
-                //        auto filled = plane[i];
-                auto filled = grid.get(x, y, z);
-                cout << (filled ? "0 " : "  ");
+    if (false) {
+        // print a slice of the grid?
+        for (int z = 0; z < grid.dim.z; z += 2) {
+            for (int y = 0; y < grid.dim.y; y++) {
+                for (int x = 0; x < grid.dim.x; x++) {
+                    if (x == 0) cout << endl;
+                    //        auto filled = plane[i];
+                    auto filled = grid.get(x, y, z);
+                    cout << (filled ? "0 " : "  ");
+                }
             }
+            cout << endl;
         }
-        cout << endl;
     }
     
     
@@ -324,7 +315,7 @@ int main(int argc, char **argv) {
     bool *plane = new bool[grid.dim.x * grid.dim.y];
     // print a slice of the grid?
     for (int z = 0; z < grid.dim.z; z++) {
-        for (int y = 0; y < grid.dim.x; y++) {
+        for (int y = 0; y < grid.dim.y; y++) {
             for (int x = 0; x < grid.dim.x; x++) {
                 //        auto filled = plane[i];
                 auto filled = grid.get(x, y, z);
@@ -333,7 +324,7 @@ int main(int argc, char **argv) {
         }
     }
     
-    for (int y = 0; y < grid.dim.x; y++) {
+    for (int y = 0; y < grid.dim.y; y++) {
         for (int x = 0; x < grid.dim.x; x++) {
             if (x == 0) cout << endl;
             //        auto filled = plane[i];
@@ -357,12 +348,12 @@ int main(int argc, char **argv) {
                 //-z: 4
                 //+z: 5
                 bool hits[] = {
-                    (x > 0 && grid.index(x-1, y, z)),
-                    (x < grid.dim.x && grid.get(x+1, y, z)),
-                    (y > 0 && grid.index(x, y-1, z)),
-                    (y < grid.dim.y && grid.get(x, y+1, z)),
-                    (z > 0 && grid.index(x, y, z-1)),
-                    (z < grid.dim.z && grid.get(x, y, z+1))
+                    (x > 0 && grid.get(x-1, y, z)),
+                    (x < (grid.dim.x-1) && grid.get(x+1, y, z)),
+                    (y > 0 && grid.get(x, y-1, z)),
+                    (y < (grid.dim.y-1) && grid.get(x, y+1, z)),
+                    (z > 0 && grid.get(x, y, z-1)),
+                    (z < (grid.dim.z-1) && grid.get(x, y, z+1))
                 };
                 
                 // add geometry where neighbors are missing
@@ -384,8 +375,8 @@ int main(int argc, char **argv) {
         file << "v " << point.x << " " << point.y << " " << point.z << endl;
     }
     file << endl;
-    for (int i = 0; i < indices.size(); i+=3) {
-        file << "f " << indices[i+0]+1 << " " << indices[i+1]+1 << " " << indices[i+2]+1 << endl;
+    for (int i = 0; i < indices.size(); i+=4) {
+        file << "f " << indices[i+0]+1 << " " << indices[i+1]+1 << " " << indices[i+2]+1 << " " << indices[i+3]+1 << endl;
     }
     file.close();
     

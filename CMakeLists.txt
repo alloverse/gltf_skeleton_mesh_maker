@@ -13,7 +13,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Add the source file
-add_executable(gltf_to_skeletonbox main.cpp)
+add_executable(gltf_to_skeletonbox 
+main.cpp
+octree.cpp
+octree.h
+point.h
+)
 
 
 
