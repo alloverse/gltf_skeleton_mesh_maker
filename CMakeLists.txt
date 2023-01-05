@@ -5,7 +5,6 @@ project(gltf_to_skeletonbox)
 
 include_directories(SYSTEM
     "${PROJECT_SOURCE_DIR}/tinygltf"
-    "${PROJECT_SOURCE_DIR}/hash-octree"
 )
 
 # Set the C++ standard to C++17
@@ -24,6 +23,5 @@ point.h
 
 # Add the library
 add_subdirectory(tinygltf)
-add_subdirectory(hash-octree)
 
-target_link_libraries(gltf_to_skeletonbox tinygltf hash-octree)
+target_link_libraries(gltf_to_skeletonbox tinygltf)
